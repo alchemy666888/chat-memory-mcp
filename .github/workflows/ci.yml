@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: chat_memory_mcp_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CHAT_MEMORY_TEST_OWNER_URL: postgres://chat_memory_owner:chat-memory-owner-test@127.0.0.1:5432/chat_memory_mcp_test
+      CHAT_MEMORY_TEST_READER_URL: postgres://chat_memory_reader:chat-memory-reader-test@127.0.0.1:5432/chat_memory_mcp_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Create isolated roles
+        run: |
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d chat_memory_mcp_test -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE chat_memory_owner LOGIN PASSWORD 'chat-memory-owner-test';
+          CREATE ROLE chat_memory_reader LOGIN PASSWORD 'chat-memory-reader-test' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+          GRANT pg_read_all_stats TO chat_memory_owner;
+          ALTER DATABASE chat_memory_mcp_test OWNER TO chat_memory_owner;
+          REVOKE ALL ON SCHEMA public FROM chat_memory_reader;
+          SQL
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm test:unit
+      - run: pnpm test:integration
+      - run: pnpm test:contracts
+      - run: pnpm build
